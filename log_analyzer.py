@@ -4,10 +4,12 @@ def read_file(filename):
     return logs
 
 def main():
-    logs = read_log_file("auth.log")
+    logs = read_file("auth.log")
 
     for line in logs:
-        print(line.strip())
+        if "Failed password" in line:
+            print(line.strip())
+
 
 if __name__ == "__main__":
     main()
