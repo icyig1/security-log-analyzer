@@ -2,6 +2,7 @@ import re
 import json
 import time
 import argparse
+import bisect
 from collections import defaultdict
 
 # Match: time, user, ip
@@ -34,8 +35,32 @@ def severity_score(count):
     else:
         return "LOW"
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Security Log Analyzer")
 
-def main():
+    parser.add_argument(
+        "--realtime",
+        action="store_true",
+        help="Run in real-time monitoring mode"
+    )
+
+    parser.add_argument(
+        "--batch",
+        action="store_true",
+        help="Run in batch analysis mode"
+    )
+
+    return parser.parse_args()
+
+
+def alert(ip, user, count):
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ALERT TRIGGERED")
+    print(f"IP: {ip}")
+    print(f"User: {user}")
+    print(f"Attempts: {count}")
+
+def main(mode):
+    last_alert_time = {}
 
     ip_counts = {}
     user_counts = {}
@@ -47,9 +72,14 @@ def main():
 
     event_counter = 0
 
-    print("=== STARTING REAL-TIME SECURITY MONITOR ===\n")
+    if mode == "realtime":
+        log_stream = stream_file("auth.log")
+    else:
+        log_stream = open("auth.log", "r")
 
-    for line in stream_file("auth.log"):
+    print(f"=== STARTING {mode.upper()} SECURITY MONITOR ===\n")
+
+    for line in log_stream:
 
         if "Failed password" not in line:
             continue
@@ -63,7 +93,7 @@ def main():
         ip = match.group(3)
 
         # store timestamps
-        ip_times[ip].append(time_str)
+        bisect.insort(ip_times[ip], to_seconds(time_str))
 
         # update counts safely
         ip_counts[ip] = ip_counts.get(ip, 0) + 1
@@ -79,24 +109,29 @@ def main():
                 print(f"{ip}: {count} attempts")
 
         # BRUTE FORCE DETECTION 
-        seconds = sorted([to_seconds(t) for t in ip_times[ip]])
 
-        start = 0
-        detected = False
+        if ip_counts[ip] >= alert_threshold:
 
-        for end in range(len(seconds)):
-            while seconds[end] - seconds[start] > alert_window:
-                start += 1
+            start = 0
+            times = ip_times[ip]
 
-            if (end - start + 1) >= alert_threshold:
-                if ip not in sus_ip:
-                    print(f"\n🚨 BRUTE FORCE DETECTED FROM {ip}")
-                    sus_ip[ip] = count
-                detected = True
-                break
+            for end in range(len(times)):
+                while times[end] - times[start] > alert_window:
+                    start += 1
+
+                if (end - start + 1) >= alert_threshold:
+
+                    # prevent spam alerts within same window
+                    if ip not in last_alert_time or time.time() - last_alert_time[ip] > 60:
+
+                        last_alert_time[ip] = time.time()
+                        alert(ip, user, ip_counts[ip])
+                        sus_ip[ip] = ip_counts[ip]
+
+                    break
 
         # small sleep prevents CPU overuse
-        time.sleep(0.01)
+        time.sleep(0.05)
 
     # FINAL REPORT (only if loop ends manually) 
     print("\n=== FINAL SECURITY REPORT ===")
@@ -115,6 +150,11 @@ def main():
 
     # export report
     report = {
+        "summary": {
+            "total_ips": len(ip_counts),
+            "total_users": len(user_counts),
+            "total_events": sum(ip_counts.values())
+        },
         "ip_counts": dict(ip_counts),
         "user_counts": dict(user_counts),
         "suspicious_ips": dict(sus_ip)
@@ -125,6 +165,13 @@ def main():
 
     print("\nReport saved to security_report.json")
 
+    if hasattr(log_stream, "close"):
+        log_stream.close()
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+
+    if args.realtime:
+        main("realtime")
+    else:
+        main("batch")
