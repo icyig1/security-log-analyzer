@@ -2,8 +2,8 @@ import re
 import json
 import time
 import argparse
-import bisect
 from collections import defaultdict
+from collections import deque
 
 # Match: time, user, ip
 pattern = r"^\w+\s+\d+\s+(\d+:\d+:\d+).*Failed password for (\S+) from (\d+\.\d+\.\d+\.\d+)"
@@ -53,8 +53,9 @@ def parse_args():
     return parser.parse_args()
 
 
-def alert(ip, user, count):
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ALERT TRIGGERED")
+def alert(ip, user, count, severity):
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ALERT")
+    print(f"Severity: {severity}")
     print(f"IP: {ip}")
     print(f"User: {user}")
     print(f"Attempts: {count}")
@@ -64,7 +65,7 @@ def main(mode):
 
     ip_counts = {}
     user_counts = {}
-    ip_times = defaultdict(list)
+    ip_times = defaultdict(deque)
     sus_ip = {}
 
     alert_window = 60
@@ -72,71 +73,84 @@ def main(mode):
 
     event_counter = 0
 
-    if mode == "realtime":
-        log_stream = stream_file("auth.log")
-    else:
-        log_stream = open("auth.log", "r")
+    try:
+        if mode == "realtime":
+            log_stream = stream_file("auth.log")
+        else:
+            log_stream = open("auth.log", "r")
+
+    except FileNotFoundError:
+        print ("ERROR: auth.log file not found")
+        return
 
     print(f"=== STARTING {mode.upper()} SECURITY MONITOR ===\n")
+    try:
+        for line in log_stream:
 
-    for line in log_stream:
+            if "Failed password" not in line:
+                continue
 
-        if "Failed password" not in line:
-            continue
+            match = re.search(pattern, line)
+            if not match:
+                continue
 
-        match = re.search(pattern, line)
-        if not match:
-            continue
+            time_str = match.group(1)
+            user = match.group(2)
+            ip = match.group(3)
 
-        time_str = match.group(1)
-        user = match.group(2)
-        ip = match.group(3)
+            # Convert timestamp to seconds
+            current_time = to_seconds(time_str)
 
-        # store timestamps
-        bisect.insort(ip_times[ip], to_seconds(time_str))
+            # Add newest timestamp
+            ip_times[ip].append(current_time)
 
-        # update counts safely
-        ip_counts[ip] = ip_counts.get(ip, 0) + 1
-        user_counts[user] = user_counts.get(user, 0) + 1
+            # Remove timestamps outside the alert window
+            while ip_times[ip] and current_time - ip_times[ip][0] > alert_window:
+                ip_times[ip].popleft()
 
-        event_counter += 1
+            # Update counters
+            ip_counts[ip] = ip_counts.get(ip, 0) + 1
+            user_counts[user] = user_counts.get(user, 0) + 1
 
-        # LIVE SUMMARY (every 20 events)
-        if event_counter % 20 == 0:
-            print("\n=== LIVE TOP ATTACKERS ===")
-            top_ips = sorted(ip_counts.items(), key=lambda x: x[1], reverse=True)[:5]
-            for ip, count in top_ips:
-                print(f"{ip}: {count} attempts")
+            event_counter += 1
 
-        # BRUTE FORCE DETECTION 
+            # Live summary every 20 failed logins
+            if event_counter % 20 == 0:
+                print("\n=== LIVE TOP ATTACKERS ===")
+                top_ips = sorted(
+                    ip_counts.items(),
+                    key=lambda x: x[1],
+                    reverse=True
+                )[:5]
 
-        if ip_counts[ip] >= alert_threshold:
+                for top_ip, count in top_ips:
+                    print(f"{top_ip}: {count} attempts")
 
-            start = 0
-            times = ip_times[ip]
+            if len(ip_times[ip]) >= alert_threshold:
 
-            for end in range(len(times)):
-                while times[end] - times[start] > alert_window:
-                    start += 1
+                if ip not in last_alert_time or time.time() - last_alert_time[ip] > alert_window:
 
-                if (end - start + 1) >= alert_threshold:
+                    last_alert_time[ip] = time.time()
 
-                    # prevent spam alerts within same window
-                    if ip not in last_alert_time or time.time() - last_alert_time[ip] > 60:
+                    severity = severity_score(ip_counts[ip])
+                    alert(ip, user, ip_counts[ip], severity)
 
-                        last_alert_time[ip] = time.time()
-                        alert(ip, user, ip_counts[ip])
-                        sus_ip[ip] = ip_counts[ip]
-
-                    break
-
-        # small sleep prevents CPU overuse
-        time.sleep(0.05)
+                    sus_ip[ip] = {
+                        "attempts": ip_counts[ip],
+                        "severity": severity
+                    }
+            if mode == "realtime":
+                time.sleep(0.05)
+    except KeyboardInterrupt:
+        print("\nStopping monitor...")
+          
 
     # FINAL REPORT (only if loop ends manually) 
     print("\n=== FINAL SECURITY REPORT ===")
 
-    for ip, count in ip_counts.items():
+    for ip, count in sorted(ip_counts.items(),
+                        key=lambda x: x[1],
+                        reverse=True):
         severity = severity_score(count)
         print(f"{ip}: {count} attempts | SEVERITY: {severity}")
 
@@ -145,8 +159,8 @@ def main(mode):
         print(f"{user}: {count} attempts")
 
     print("\n=== SUSPICIOUS IPS ===")
-    for ip, count in sus_ip.items():
-        print(f"{ip} ({count} FAILED ATTEMPTS)")
+    for ip, data in sus_ip.items():
+        print(f"{ip} ({data['attempts']} FAILED ATTEMPTS) - SEVERITY: {data['severity']}")
 
     # export report
     report = {
@@ -157,7 +171,7 @@ def main(mode):
         },
         "ip_counts": dict(ip_counts),
         "user_counts": dict(user_counts),
-        "suspicious_ips": dict(sus_ip)
+        "suspicious_ips": sus_ip
     }
 
     with open("security_report.json", "w") as f:
