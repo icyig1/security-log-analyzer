@@ -8,3 +8,8 @@ Jun 25 10:07:18 server sshd[1240]: Failed password for root from 172.16.1.50 por
 Jun 25 10:08:21 server sshd[1241]: Failed password for root from 172.16.1.50 port 22
 Jun 25 10:09:25 server sshd[1242]: Failed password for root from 172.16.1.50 port 22
 Jun 25 10:10:29 server sshd[1243]: Failed password for root from 172.16.1.50 port 22
+Jul 13 12:00:01 sshd[123]: Failed password for admin from 192.168.1.50 port 22 ssh2
+Jul 13 12:00:05 sshd[123]: Failed password for admin from 192.168.1.50 port 22 ssh2
+Jul 13 12:00:10 sshd[123]: Failed password for admin from 192.168.1.50 port 22 ssh2
+Jul 13 12:00:15 sshd[123]: Failed password for admin from 192.168.1.50 port 22 ssh2
+Jul 13 12:00:20 sshd[123]: Failed password for admin from 192.168.1.50 port 22 ssh2

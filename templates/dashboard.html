@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+<title>Security Dashboard</title>
+<link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+<h1>Security Monitoring Dashboard</h1>
+    <p>
+    Status:
+    <span style="color:green">
+    ● Monitoring Active
+    </span>
+    </p>
+<h2>Suspicious IPs</h2>
+
+<table-border="1">
+
+<tr>
+<th>IP</th>
+<th>Attempts</th>
+<th>Severity</th>
+</tr>
+
+
+<tbody id="alerts">
+
+</tbody>
+
+</table>
+
+
+<script>
+
+function loadAlerts() {
+
+    fetch("/alerts")
+    .then(response => response.json())
+    .then(data => {
+
+        let table = document.getElementById("alerts");
+
+        // Clear old rows
+        table.innerHTML = "";
+
+        for(let ip in data){
+
+            let color = "";
+
+            if(data[ip].severity === "HIGH"){
+                color = "red";
+            }
+            else if(data[ip].severity === "MEDIUM"){
+                color = "orange";
+            }
+            else{
+                color = "green";
+            }
+
+
+            let row = `
+            <tr>
+                <td>${ip}</td>
+                <td>${data[ip].attempts}</td>
+                <td style="color:${color}">
+                    ${data[ip].severity}
+                </td>
+            </tr>
+            `;
+
+
+            table.innerHTML += row;
+
+        }
+
+    });
+
+}
+
+
+// Load dashboard immediately
+loadAlerts();
+
+
+// Refresh every 5 seconds
+setInterval(loadAlerts, 5000);
+
+
+</script>
+
+</body>
+
+</html>

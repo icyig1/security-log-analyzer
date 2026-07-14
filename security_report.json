@@ -1,18 +1,24 @@
 {
     "summary": {
-        "total_ips": 3,
+        "total_ips": 4,
         "total_users": 3,
-        "total_events": 9
+        "total_events": 14
     },
     "ip_counts": {
         "192.168.1.100": 2,
         "10.0.0.15": 1,
-        "172.16.1.50": 6
+        "172.16.1.50": 6,
+        "192.168.1.50": 5
     },
     "user_counts": {
         "root": 7,
-        "admin": 1,
+        "admin": 6,
         "user": 1
     },
-    "suspicious_ips": {}
+    "suspicious_ips": {
+        "192.168.1.50": {
+            "attempts": 5,
+            "severity": "MEDIUM"
+        }
+    }
 }

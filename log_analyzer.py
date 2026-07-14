@@ -2,8 +2,7 @@ import re
 import json
 import time
 import argparse
-from collections import defaultdict
-from collections import deque
+from collections import defaultdict, deque
 
 # Match: time, user, ip
 pattern = r"^\w+\s+\d+\s+(\d+:\d+:\d+).*Failed password for (\S+) from (\d+\.\d+\.\d+\.\d+)"
