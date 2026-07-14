@@ -2,10 +2,72 @@ import re
 import json
 import time
 import argparse
+
+import linux
+import apache
+import windows
+import firewall
+
 from collections import defaultdict, deque
 
+from scapy.all import rdpcap
+from scapy.all import sniff
+
+try:
+    import win32evtlog
+except ImportError:
+    win32evtlog = None
+
+import socket
+
 # Match: time, user, ip
-pattern = r"^\w+\s+\d+\s+(\d+:\d+:\d+).*Failed password for (\S+) from (\d+\.\d+\.\d+\.\d+)"
+
+
+def receive_logs():
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    sock.bind(("0.0.0.0", 514))
+
+    while True:
+
+        data, addr = sock.recvfrom(4096)
+
+        print(data.decode())
+
+def watch_folder(folder):
+    print("Watching", folder)
+
+def read_windows_logs():
+
+    if win32evtlog is None:
+        print("Windows Event Logs are only supported on Windows.")
+        return
+
+    server = "localhost"
+
+    logtype = "Security"
+
+    hand = win32evtlog.OpenEventLog(server, logtype)
+
+    events = win32evtlog.ReadEventLog(
+        hand,
+        win32evtlog.EVENTLOG_FORWARDS_READ,
+        0
+    )
+
+    for event in events:
+        print(event.EventID)
+
+def analyze_pcap(filename):
+
+    packets = rdpcap(filename)
+
+    for packet in packets:
+        print(packet.summary())
+
+def live_capture():
+    sniff(store=False, prn=lambda pkt: print(pkt.summary()))
 
 def stream_file(filename):
     with open(filename, "r") as file:
@@ -42,11 +104,26 @@ def parse_args():
         action="store_true",
         help="Run in real-time monitoring mode"
     )
+    parser.add_argument(
+        "--network",
+        action="store_true"
+    )
 
     parser.add_argument(
         "--batch",
         action="store_true",
         help="Run in batch analysis mode"
+    )
+    
+    parser.add_argument(
+        "logfile",
+        help="Path to the log file"
+    )
+    parser.add_argument(
+        "--type",
+        default="linux",
+        choices=["linux", "apache", "windows", "firewall"],
+        help="Type of log file"
     )
 
     return parser.parse_args()
@@ -59,7 +136,7 @@ def alert(ip, user, count, severity):
     print(f"User: {user}")
     print(f"Attempts: {count}")
 
-def main(mode):
+def main(mode, logfile, log_type):
     last_alert_time = {}
 
     ip_counts = {}
@@ -71,31 +148,51 @@ def main(mode):
     alert_threshold = 5
 
     event_counter = 0
+    
 
     try:
-        if mode == "realtime":
-            log_stream = stream_file("auth.log")
-        else:
-            log_stream = open("auth.log", "r")
+        if logfile.endswith(".pcap"):
+            analyze_pcap(logfile)
+            return
 
+        if mode == "realtime":
+            log_stream = stream_file(logfile)
+        else:
+            log_stream = open(logfile, "r")
     except FileNotFoundError:
-        print ("ERROR: auth.log file not found")
+        print(f"ERROR: {logfile} not found")
         return
 
     print(f"=== STARTING {mode.upper()} SECURITY MONITOR ===\n")
     try:
         for line in log_stream:
 
-            if "Failed password" not in line:
+            if log_type == "linux" and "Failed password" not in line:
                 continue
 
-            match = re.search(pattern, line)
-            if not match:
+            if log_type == "linux":
+                result = linux.parse(line)
+
+            elif log_type == "apache":
+                result = apache.parse(line)
+
+            elif log_type == "windows":
+                result = windows.parse(line)
+
+            elif log_type == "firewall":
+                result = firewall.parse(line)
+
+            else:
                 continue
 
-            time_str = match.group(1)
-            user = match.group(2)
-            ip = match.group(3)
+            if result is None:
+                continue
+
+            time_str = result["time"]
+            user = result["user"]
+            ip = result["ip"]
+
+            
 
             # Convert timestamp to seconds
             current_time = to_seconds(time_str)
@@ -182,9 +279,14 @@ def main(mode):
         log_stream.close()
 
 if __name__ == "__main__":
+
     args = parse_args()
 
-    if args.realtime:
-        main("realtime")
+    if args.network:
+        live_capture()
+
+    elif args.realtime:
+        main("realtime", args.logfile, args.type)
+
     else:
-        main("batch")
+        main("batch", args.logfile, args.type)
