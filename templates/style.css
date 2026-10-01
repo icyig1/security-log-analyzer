@@ -1,7 +1,7 @@
 body {
     font-family: Arial, sans-serif;
     margin: 40px;
-    background-color: rgba(255, 230, 100);
+    background-color: rgb(255, 230, 100);
 }
 
 h1 {
@@ -12,6 +12,7 @@ table {
     width: 60%;
     border-collapse: collapse;
     background: white;
+    margin-bottom: 24px;
 }
 
 th {
@@ -29,3 +30,68 @@ tr:nth-child(even) {
     background-color: #f2f2f2;
 }
 
+.status {
+    font-weight: 600;
+}
+
+.status.live {
+    color: #1b5e20;
+}
+
+.status.stale {
+    color: #555;
+}
+
+.status.error {
+    color: #b00020;
+}
+
+.rule {
+    margin-top: 0;
+    color: #333;
+}
+
+.stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 40px;
+    margin: 20px 0 28px;
+    padding: 0;
+}
+
+.stats dt {
+    font-size: 0.85rem;
+    color: #333;
+}
+
+.stats dd {
+    margin: 2px 0 0;
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: #222;
+}
+
+.sev-HIGH {
+    color: #b00020;
+    font-weight: 700;
+}
+
+.sev-MEDIUM {
+    color: #9a4a00;
+    font-weight: 700;
+}
+
+.sev-LOW {
+    color: #1b5e20;
+    font-weight: 700;
+}
+
+@media (max-width: 800px) {
+    body {
+        margin: 16px;
+    }
+
+    table {
+        width: 100%;
+    }
+}
