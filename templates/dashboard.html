@@ -1,95 +1,163 @@
 <!DOCTYPE html>
-
-<html>
+<html lang="en">
 
 <head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Security Dashboard</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 
 <body>
 
 <h1>Security Monitoring Dashboard</h1>
-    <p>
-    Status:
-    <span style="color:green">
-    ● Monitoring Active
-    </span>
-    </p>
+
+<p id="status" class="status">Loading report…</p>
+<p id="rule" class="rule"></p>
+
+<dl class="stats">
+    <div><dt>Events counted</dt><dd id="stat-events">–</dd></div>
+    <div><dt>Source IPs</dt><dd id="stat-ips">–</dd></div>
+    <div><dt>Accounts targeted</dt><dd id="stat-users">–</dd></div>
+    <div><dt>Suspicious IPs</dt><dd id="stat-suspicious">–</dd></div>
+</dl>
+
 <h2>Suspicious IPs</h2>
 
-<table-border="1">
-
-<tr>
-<th>IP</th>
-<th>Attempts</th>
-<th>Severity</th>
-</tr>
-
-
-<tbody id="alerts">
-
-</tbody>
-
+<table>
+    <thead>
+        <tr>
+            <th>IP</th>
+            <th>Total attempts</th>
+            <th>Peak in window</th>
+            <th>Severity</th>
+            <th>Last alert</th>
+        </tr>
+    </thead>
+    <tbody id="alerts"></tbody>
 </table>
 
+<h2>Most targeted accounts</h2>
+
+<table>
+    <thead>
+        <tr>
+            <th>Account</th>
+            <th>Attempts</th>
+        </tr>
+    </thead>
+    <tbody id="users"></tbody>
+</table>
 
 <script>
+const REFRESH_MS = 5000;
+const LIVE_IF_UNDER_SECONDS = 15;
+const SEVERITY_ORDER = { HIGH: 0, MEDIUM: 1, LOW: 2 };
 
-function loadAlerts() {
-
-    fetch("/alerts")
-    .then(response => response.json())
-    .then(data => {
-
-        let table = document.getElementById("alerts");
-
-        // Clear old rows
-        table.innerHTML = "";
-
-        for(let ip in data){
-
-            let color = "";
-
-            if(data[ip].severity === "HIGH"){
-                color = "red";
-            }
-            else if(data[ip].severity === "MEDIUM"){
-                color = "orange";
-            }
-            else{
-                color = "green";
-            }
-
-
-            let row = `
-            <tr>
-                <td>${ip}</td>
-                <td>${data[ip].attempts}</td>
-                <td style="color:${color}">
-                    ${data[ip].severity}
-                </td>
-            </tr>
-            `;
-
-
-            table.innerHTML += row;
-
-        }
-
-    });
-
+function byId(id) {
+    return document.getElementById(id);
 }
 
+function makeCell(text, className) {
+    const td = document.createElement("td");
+    td.textContent = text;
+    if (className) {
+        td.className = className;
+    }
+    return td;
+}
 
-// Load dashboard immediately
-loadAlerts();
+// rows: array of rows, each row an array of [text, className] pairs.
+function fillTable(tbodyId, rows, emptyMessage, columnCount) {
+    const tbody = byId(tbodyId);
+    tbody.replaceChildren();
 
+    if (rows.length === 0) {
+        const tr = document.createElement("tr");
+        const td = makeCell(emptyMessage);
+        td.colSpan = columnCount;
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        return;
+    }
 
-// Refresh every 5 seconds
-setInterval(loadAlerts, 5000);
+    for (const cells of rows) {
+        const tr = document.createElement("tr");
+        for (const [text, className] of cells) {
+            tr.appendChild(makeCell(text, className));
+        }
+        tbody.appendChild(tr);
+    }
+}
 
+function formatAge(seconds) {
+    if (seconds < 60) return Math.round(seconds) + "s ago";
+    if (seconds < 3600) return Math.round(seconds / 60) + "m ago";
+    return Math.round(seconds / 3600) + "h ago";
+}
 
+function showStatus(text, className) {
+    const status = byId("status");
+    status.textContent = text;
+    status.className = "status " + className;
+}
+
+function render(report) {
+    const summary = report.summary;
+    byId("stat-events").textContent = summary.total_events;
+    byId("stat-ips").textContent = summary.total_ips;
+    byId("stat-users").textContent = summary.total_users;
+    byId("stat-suspicious").textContent = Object.keys(report.suspicious_ips).length;
+
+    if (report.rule) {
+        byId("rule").textContent =
+            "Alert rule: " + report.rule.threshold + " or more failures from one IP within " +
+            report.rule.window_seconds + " seconds.";
+    }
+
+    const age = (Date.now() - Date.parse(report.generated_at)) / 1000;
+    if (age < LIVE_IF_UNDER_SECONDS) {
+        showStatus("● Report updated " + formatAge(age), "live");
+    } else {
+        showStatus("○ Last report " + formatAge(age), "stale");
+    }
+
+    const suspicious = Object.entries(report.suspicious_ips)
+        .sort((a, b) =>
+            (SEVERITY_ORDER[a[1].severity] - SEVERITY_ORDER[b[1].severity]) ||
+            (b[1].attempts - a[1].attempts))
+        .map(([ip, info]) => [
+            [ip],
+            [info.attempts],
+            [info.peak_window_attempts],
+            [info.severity, "sev-" + info.severity],
+            [new Date(info.last_alert).toLocaleString()],
+        ]);
+    fillTable("alerts", suspicious, "No suspicious IPs in this report.", 5);
+
+    const users = Object.entries(report.user_counts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([name, count]) => [[name], [count]]);
+    fillTable("users", users, "No account names in this report.", 2);
+}
+
+async function loadReport() {
+    try {
+        const response = await fetch("/report");
+        const data = await response.json();
+        if (!response.ok) {
+            showStatus(data.error || "Could not load the report.", "error");
+            return;
+        }
+        render(data);
+    } catch (error) {
+        showStatus("Cannot reach the dashboard server.", "error");
+    }
+}
+
+loadReport();
+setInterval(loadReport, REFRESH_MS);
 </script>
 
 </body>
